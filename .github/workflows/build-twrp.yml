@@ -1,0 +1,61 @@
+name: Build TWRP for Samsung GT-S7562C (kylevezn)
+
+# 触发条件：仅手动触发（避免误触发，节省额度）
+on:
+  workflow_dispatch:
+
+# 编译运行的虚拟机环境
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      # 步骤1：配置依赖+添加Swap分区
+      - name: Install Dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig python3 python3-pip openjdk-8-jdk repo wget
+          sudo ln -sf /usr/bin/python3 /usr/bin/python
+          # 配置repo工具
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "PATH=~/bin:$PATH" >> ~/.bashrc
+          source ~/.bashrc
+          # 添加8G Swap分区（解决老旧机型编译内存不足）
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+      # 步骤2：拉取适配老旧机型的TWRP源码（twrp-9分支）
+      - name: Clone TWRP Source
+        run: |
+          mkdir -p ~/twrp && cd ~/twrp
+          repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-9
+          # 低线程+重试，避免同步失败
+          repo sync -j2 --force-sync --no-clone-bundle || repo sync -j2 --force-sync --no-clone-bundle || repo sync -j2 --force-sync --no-clone-bundle
+
+      # 步骤3：拉取你的设备树
+      - name: Copy Device Tree
+        run: |
+          cd ~/twrp/device/samsung
+          git clone https://github.com/HoeKwan/android_device_samsung_kylevezn kylevezn
+          # 若你的设备树依赖内核/vendor，取消注释并添加对应仓库地址
+          # git clone [内核仓库地址] ~/twrp/kernel/samsung/kylevezn
+          # git clone [vendor仓库地址] ~/twrp/vendor/samsung/kylevezn
+
+      # 步骤4：编译TWRP（低线程保证稳定）
+      - name: Build TWRP
+        run: |
+          cd ~/twrp
+          source build/envsetup.sh
+          # 确认Lunch名称和你的设备树一致，若没有twrp_前缀则改为kylevezn-eng
+          lunch twrp_kylevezn-eng
+          mka recoveryimage -j2
+
+      # 步骤5：上传编译产物
+      - name: Upload TWRP Image
+        uses: actions/upload-artifact@v3
+        with:
+          name: twrp-gt-s7562c-kylevezn
+          path: ~/twrp/out/target/product/kylevezn/recovery.img
